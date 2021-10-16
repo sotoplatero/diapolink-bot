@@ -87,11 +87,8 @@ class DiapoLinkBot {
 
         } catch (error) {
             console.log(error);
-			  this.startStream();
-			  return
-			if (error.code === 429) {
-			  // restart stream
-			}            
+			this.startStream();
+			return
         }
 
 	}
