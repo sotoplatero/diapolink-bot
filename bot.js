@@ -1,67 +1,92 @@
 require('dotenv').config()
 const { ETwitterStreamEvent, TweetStream, TwitterApi, ETwitterApiError } = require('twitter-api-v2');
+const Twitter = require('twitter-lite');
 
-// const client = new TwitterApi(process.env.TWITTER_BEARER_TOKEN);
-const client = new TwitterApi({ 
-	appKey: process.env.TWITTER_CONSUMER_KEY, 
+const client = new TwitterApi(process.env.TWITTER_BEARER_TOKEN);
+const userClient = new TwitterApi({
+	appKey: process.env.TWITTER_CONSUMER_KEY,
 	appSecret: process.env.TWITTER_CONSUMER_SECRET,
-	accessToken: process.env.TWITTER_ACCESS_TOKEN, // oauth token from previous step (link generation)
-	accessSecret: process.env.TWITTER_ACCESS_SECRET, // oauth token secret from previous step (link generation)	
+	accessToken: process.env.ACCESS_TOKEN_KEY,
+	accessSecret: process.env.ACCESS_TOKEN_SECRET,
 });
 
-( async () => {
+class DiapoLinkBot {
 
-	const rules = await client.v2.streamRules();
-	if (rules.data?.length) {
-	  await client.v2.updateStreamRules({
-	    delete: { ids: rules.data.map(rule => rule.id) },
-	  });
+    constructor() {
+        this.client = new TwitterApi(process.env.TWITTER_BEARER_TOKEN);
+    }
+
+	async initRules(){
+		const rules = await this.client.v2.streamRules();
+
+		if (rules.data?.length) {
+		  await this.client.v2.updateStreamRules({
+		    delete: { ids: rules.data.map(rule => rule.id) },
+		  });
+		}
+
+		// Add rules
+		const addedRules = await this.client.v2.updateStreamRules({
+		  add: [
+		    { value: '"@diapolink thread" is:reply', tag: 'thread' },
+		  ],
+		});
 	}
 
-	// Add rules
-	const addedRules = await client.v2.updateStreamRules({
-	  add: [
-	    { value: '@diapolink thread is:reply', tag: 'thread' },
-	  ],
-	});
+	async stream() { 
+		const diapolinkUserId = '1437516435463491585'
 
-	const stream = await client.v2.searchStream({
-		'tweet.fields': [ 'conversation_id', 'referenced_tweets'],
-		expansions: ['referenced_tweets.id'],
-	});
+		await this.initRules()
+		try {
 
-	stream.autoReconnect = true;
+			const stream = await client.v2.searchStream({
+				'tweet.fields': [ 'conversation_id', 'referenced_tweets'],
+				'user.fields': [ 'username' ],
+				expansions: ['referenced_tweets.id','author_id'],
+			});
 
-	const replyThreadText = (tweet) => `Gracias por utilizar @diapolink. La presentación del hilo puedes verla en http://diapo.link/thread/${tweet.conversation_id}`
+			stream.autoReconnect = true;
+			stream.autoReconnectRetries = Infinity;	
 
-	stream.on(ETwitterStreamEvent.Data, async ({data: tweet, matching_rules: rules}) => {
-		console.log(tweet)
+			const replyThreadText = ({tweet, author}) => `I got it!! You can see @${author.username}'s slideshow here https://diapo.link/thread/${tweet.conversation_id}. Thank you for using DiapoLink`
 
-		// const isRT = tweet.data.referenced_tweets?.some(tweet => tweet.type === 'retweeted') ?? false;
-		// if (isRT ) 	return;
+			stream.on(ETwitterStreamEvent.Data, async (data) => {
+				console.log(data)
 
-		if ( rules.some( rule => rule.tag === 'thread') ) {
-			console.log(tweet.conversation_id)
-			await client.v1.reply( replyThreadText(tweet), tweet.id ) 
-		}
-		// Ignore RTs or self-sent tweets
+				const { data: tweet, includes: { users }, matching_rules: rules } = data
+				const author = users.find( u => u.id === tweet.author_id )
 
-		// Reply to tweet
-	});
+				const isRT = tweet.referenced_tweets?.some(tweet => tweet.type === 'retweeted') ?? false;
+				if ( isRT || tweet.author_id === diapolinkUserId ) {
+					return;
+				}
 
-	stream.on(
-	  // Emitted when a Twitter sent a signal to maintain connection active
-	  ETwitterStreamEvent.DataKeepAlive,
-	  () => console.log('Twitter has a keep-alive packet.'),
-	);
+				if ( rules.some( rule => rule.tag === 'thread') ) {
+					await userClient.v1.reply( replyThreadText({tweet,author}), tweet.id ) 
+				}
+			});
 
-	stream.on( 
-		ETwitterStreamEvent.ConnectionError,
-		err => console.log('Connection error!', err),
-	);
-	// Enable reconnect feature
+            stream.on(ETwitterStreamEvent.Error, async (error) => {
+                console.log(`Twitter Event:Error: ${JSON.stringify(error)}`);
+            });
+            stream.on(ETwitterStreamEvent.ReconnectAttempt, async () => {
+                console.log(`Twitter Event:ReconnectAttempt`);
+            });
+            stream.on(ETwitterStreamEvent.Reconnected, async () => {
+                console.log(`Twitter Event:Reconnected`);
+            });
+            stream.on(ETwitterStreamEvent.DataKeepAlive, async () => {
+                console.log(`Twitter Event:DataKeepAlive`);
+            });
+        } catch (error) {
+            console.log(error);
+        }
 
-	// Be sure to close the stream where you don't want to consume data anymore from it
-	// stream.close();
+	}
+}
 
-})()
+const bot = new DiapoLinkBot();
+
+(async () => {
+    await bot.stream();
+})();
