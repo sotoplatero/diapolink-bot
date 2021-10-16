@@ -48,18 +48,17 @@ class DiapoLinkBot {
 			this.stream = await this.client.v2.searchStream({
 				'tweet.fields': [ 'conversation_id', 'referenced_tweets'],
 				'user.fields': [ 'username' ],
-				expansions: ['referenced_tweets.id','author_id'],
+				expansions: ['referenced_tweets.id', 'author_id'],
 			});
 			console.log('Connected to the Twitter stream');
 			this.stream.autoReconnect = true;
 			this.stream.autoReconnectRetries = 999;	
 
-			const replyThreadText = ({tweet, author}) => `I got it!! You can see @${author.username}'s slideshow here https://diapo.link/thread/${tweet.conversation_id}. Thank you for using DiapoLink`
+			const replyThreadText = ({tweet, author}) => `I got it!! You can see thread's slideshow here https://diapo.link/thread/${tweet.conversation_id}. Thank you for using DiapoLink`
 
 			this.stream.on(ETwitterStreamEvent.Data, async (data) => {
-				console.log(data)
 
-				const { data: tweet, includes: { users }, matching_rules: rules } = data
+				const { data: tweet, includes: { users, tweets }, matching_rules: rules } = data
 				const author = users.find( u => u.id === tweet.author_id )
 
 				const isRT = tweet.referenced_tweets?.some(tweet => tweet.type === 'retweeted') ?? false;
