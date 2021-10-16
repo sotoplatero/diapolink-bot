@@ -14,6 +14,12 @@ class DiapoLinkBot {
 
     constructor() {
         this.client = new TwitterApi(process.env.TWITTER_BEARER_TOKEN);
+		this.userClient = new TwitterApi({
+			appKey: process.env.TWITTER_CONSUMER_KEY,
+			appSecret: process.env.TWITTER_CONSUMER_SECRET,
+			accessToken: process.env.ACCESS_TOKEN_KEY,
+			accessSecret: process.env.ACCESS_TOKEN_SECRET,
+		});        
     }
 
 	async initRules(){
@@ -33,24 +39,24 @@ class DiapoLinkBot {
 		});
 	}
 
-	async stream() { 
+	async startStream() { 
 		const diapolinkUserId = '1437516435463491585'
 
 		await this.initRules()
 		try {
 
-			const stream = await client.v2.searchStream({
+			this.stream = await this.client.v2.searchStream({
 				'tweet.fields': [ 'conversation_id', 'referenced_tweets'],
 				'user.fields': [ 'username' ],
 				expansions: ['referenced_tweets.id','author_id'],
 			});
-
-			stream.autoReconnect = true;
-			stream.autoReconnectRetries = Infinity;	
+			console.log('Connected to the Twitter stream');
+			this.stream.autoReconnect = true;
+			this.stream.autoReconnectRetries = 999;	
 
 			const replyThreadText = ({tweet, author}) => `I got it!! You can see @${author.username}'s slideshow here https://diapo.link/thread/${tweet.conversation_id}. Thank you for using DiapoLink`
 
-			stream.on(ETwitterStreamEvent.Data, async (data) => {
+			this.stream.on(ETwitterStreamEvent.Data, async (data) => {
 				console.log(data)
 
 				const { data: tweet, includes: { users }, matching_rules: rules } = data
@@ -62,24 +68,30 @@ class DiapoLinkBot {
 				}
 
 				if ( rules.some( rule => rule.tag === 'thread') ) {
-					await userClient.v1.reply( replyThreadText({tweet,author}), tweet.id ) 
+					await this.userClient.v1.reply( replyThreadText({tweet,author}), tweet.id ) 
 				}
 			});
 
-            stream.on(ETwitterStreamEvent.Error, async (error) => {
+            this.stream.on(ETwitterStreamEvent.Error, async (error) => {
                 console.log(`Twitter Event:Error: ${JSON.stringify(error)}`);
             });
-            stream.on(ETwitterStreamEvent.ReconnectAttempt, async () => {
+            this.stream.on(ETwitterStreamEvent.ReconnectAttempt, async () => {
                 console.log(`Twitter Event:ReconnectAttempt`);
             });
-            stream.on(ETwitterStreamEvent.Reconnected, async () => {
+            this.stream.on(ETwitterStreamEvent.Reconnected, async () => {
                 console.log(`Twitter Event:Reconnected`);
             });
-            stream.on(ETwitterStreamEvent.DataKeepAlive, async () => {
+            this.stream.on(ETwitterStreamEvent.DataKeepAlive, async () => {
                 console.log(`Twitter Event:DataKeepAlive`);
             });
+
         } catch (error) {
             console.log(error);
+			  this.startStream();
+			  return
+			if (error.code === 429) {
+			  // restart stream
+			}            
         }
 
 	}
@@ -88,5 +100,5 @@ class DiapoLinkBot {
 const bot = new DiapoLinkBot();
 
 (async () => {
-    await bot.stream();
+    await bot.startStream();
 })();
